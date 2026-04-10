@@ -1,0 +1,48 @@
+# DSSAT generated experiment files
+generated_experiments/
+
+# plots and outputs
+plots/
+*.png
+*.jpg
+
+# DSSAT outputs
+*.OUT
+*.out
+
+# Python cache
+__pycache__/
+*.pyc
+
+# virtual env
+.venv/
+
+# PyCharm
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Environment variables / secrets
+.env
+
+# DSSAT outputs or large generated files
+*.OUT
+*.out
+*.csv
+*.tmp
+
+# model artifacts if large
+*.pkl
+*.joblib
+*.h5
+
+# local config files
+*.sqlite3
