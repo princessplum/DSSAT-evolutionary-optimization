@@ -10,7 +10,7 @@ latitude 38.1233333333333, longitude -84.4972222222222, elevation 267
 
 *TREATMENTS                        -------------FACTOR LEVELS------------
 @N R O C TNAME.................... CU FL SA IC MP MI MF MR MC MT ME MH SM
- 1 1 0 0 0N                         1  1  1  1  1  0  1  0  0  1  0  0  1
+ 1 1 0 0 BA                         1  1  1  1  1  0  1  0  0  1  0  0  1
 
 *CULTIVARS
 @C CR INGENO CNAME
@@ -18,7 +18,7 @@ latitude 38.1233333333333, longitude -84.4972222222222, elevation 267
 
 *FIELDS
 @L ID_FIELD WSTA....  FLSA  FLOB  FLDT  FLDD  FLDS  FLST SLTX  SLDP  ID_SOIL    FLNAME
- 1 UKBL0001 UKLE       -99   -99   -99   -99   -99   -99 SIL    -99  UKBL200002 -99
+ 1 UKBL0001 UKLE       -99   -99   -99   -99   -99   -99 SIL    -99  IB00000001 -99
 @L ...........XCRD ...........YCRD .....ELEV .............AREA .SLEN .FLWR .SLAS FLHST FHDUR
  1             -99             -99       -99               -99   -99   -99   -99   -99   -99
 
