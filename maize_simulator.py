@@ -202,29 +202,46 @@ C:\\DSSAT48\\Maize\\UKLE2102.MZX                                                
     def visualize_results(self, filename="results.csv"):
         df = pd.read_csv(filename)
 
-        # --- Yield vs Nitrogen Loss ---
+        # # Keep only top 30 highest-yield schedules
+        # top_df = df.nlargest(30, "HARWT")
+
+        # Yield vs Total N Applied
         plt.figure()
-        plt.scatter(df["TNLF"], df["HARWT"])
+        scatter = plt.scatter(
+            df["total_n_applied"],
+            df["HARWT"],
+            c=df["TNLF"],
+            cmap="viridis",
+            alpha=0.7
+        )
 
-        for i, row in df.iterrows():
-            plt.annotate(i + 1, (row["TNLF"], row["HARWT"]))
-
-        plt.xlabel("Nitrogen Loss (TNLF)")
-        plt.ylabel("Yield (HARWT)")
-        plt.title("Yield vs Nitrogen Loss")
+        plt.colorbar(scatter, label="Nitrogen Loss (TNLF)")
+        plt.xlabel("Total N Applied (kg/ha)")
+        plt.ylabel("Yield (HARWT kg/ha)")
+        plt.title("Yield vs Total Nitrogen Applied")
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig("yield_vs_n_loss.png")
+        plt.savefig("yield_vs_total_n.png")
 
-        # --- Yield by schedule ---
+        # NUE vs Total N Applied
         plt.figure()
-        plt.bar(range(len(df)), df["HARWT"])
-
-        plt.xlabel("Schedule Index")
-        plt.ylabel("Yield (HARWT)")
-        plt.title("Yield by Fertilizer Schedule")
+        plt.scatter(df["total_n_applied"], df["NUE"], alpha=0.5)
+        plt.xlabel("Total N Applied (kg/ha)")
+        plt.ylabel("Nitrogen Use Efficiency (NUE)")
+        plt.title("NUE vs Total Nitrogen Applied")
+        plt.grid(True)
         plt.tight_layout()
-        plt.savefig("yield_by_schedule.png")
+        plt.savefig("nue_vs_total_n.png")
+
+        # TNLF vs Total N Applied
+        plt.figure()
+        plt.scatter(df["total_n_applied"], df["TNLF"], alpha=0.5)
+        plt.xlabel("Total N Applied (kg/ha)")
+        plt.ylabel("Nitrogen Loss (TNLF kg/ha)")
+        plt.title("Nitrogen Loss vs Total Nitrogen Applied")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig("tnlf_vs_total_n.png")
 
         plt.show()
 
@@ -242,14 +259,14 @@ C:\\DSSAT48\\Maize\\UKLE2102.MZX                                                
         num_apps = random.randint(1, 3)
 
         # Possible application days after planting-ish
-        possible_dates = list(range(21140, 21181, 5))
+        possible_dates = list(range(21140, 21181)) # Every 5 days: (21140, 21181, 5))
 
         selected_dates = sorted(random.sample(possible_dates, num_apps))
 
         schedule = []
 
         for date in selected_dates:
-            amount = random.choice([25, 50, 75, 100, 125, 150])
+            amount = random.choice(range(0, 201, 10)) # Adjust Fertlizer Amounts
             schedule.append((date, amount))
 
         return schedule
@@ -284,6 +301,126 @@ C:\\DSSAT48\\Maize\\UKLE2102.MZX                                                
                 print("New best schedule found!")
 
         return best_schedule, best_result, best_score
+    
+    # ---------------------------
+    # 12. Define Fitness Score for Evolutionary Optimization
+    # ---------------------------
+    def score_result(self, result, total_n):
+        yield_weight = 1.0
+        loss_weight = 100.0
+        fertilizer_weight = 2.0
+
+        score = (
+            yield_weight * result["HARWT"]
+            - loss_weight * result["TNLF"]
+            - fertilizer_weight * total_n
+        )
+
+        return score
+    
+    # ---------------------------
+    # 13. Mutate Schedule
+    # ---------------------------
+    def mutate_schedule(self, schedule):
+        possible_dates = list(range(21140, 21181, 5))
+        possible_amounts = [25, 50, 75, 100, 125, 150]
+
+        new_schedule = schedule.copy()
+        mutation_type = random.choice(["change_amount", "change_date", "add", "remove"])
+
+        if mutation_type == "change_amount" and new_schedule:
+            i = random.randrange(len(new_schedule))
+            date, amount = new_schedule[i]
+            new_schedule[i] = (date, random.choice(possible_amounts))
+
+        elif mutation_type == "change_date" and new_schedule:
+            i = random.randrange(len(new_schedule))
+            date, amount = new_schedule[i]
+            new_schedule[i] = (random.choice(possible_dates), amount)
+
+        elif mutation_type == "add" and len(new_schedule) < 3:
+            new_schedule.append((random.choice(possible_dates), random.choice(possible_amounts)))
+
+        elif mutation_type == "remove" and len(new_schedule) > 1:
+            i = random.randrange(len(new_schedule))
+            new_schedule.pop(i)
+
+        # Sort and remove duplicate dates
+        schedule_dict = {}
+        for date, amount in new_schedule:
+            schedule_dict[date] = amount
+
+        return sorted(schedule_dict.items())
+
+    # ---------------------------
+    # 14. Crossover Schedules
+    # ---------------------------
+    def crossover_schedules(self, parent1, parent2):
+        combined = parent1 + parent2
+        random.shuffle(combined)
+
+        child = combined[:random.randint(1, min(3, len(combined)))]
+
+        # Remove duplicate dates
+        schedule_dict = {}
+        for date, amount in child:
+            schedule_dict[date] = amount
+
+        return sorted(schedule_dict.items())
+
+    # ---------------------------
+    # 15. Evolutionary Search
+    # ---------------------------
+    def evolutionary_search(self, population_size=20, generations=10):
+        population = [self.generate_random_schedule() for _ in range(population_size)]
+
+        best_schedule = None
+        best_result = None
+        best_score = float("-inf")
+
+        for gen in range(generations):
+            print(f"\nGENERATION {gen + 1}/{generations}")
+
+            evaluated = []
+
+            for schedule in population:
+                result = self.evaluate_candidate(schedule)
+
+                total_n = self.get_total_n_applied(schedule)
+
+                score = self.score_result(result, total_n)
+
+                self.save_result_to_csv(schedule, result)
+
+                evaluated.append((score, schedule, result))
+
+                if score > best_score:
+                    best_score = score
+                    best_schedule = schedule
+                    best_result = result
+                    print("New best schedule found!")
+                    print(best_schedule, best_result, best_score)
+
+            evaluated.sort(reverse=True, key=lambda x: x[0])
+
+            # Keep top 25%
+            elite_count = max(2, population_size // 4)
+            elites = evaluated[:elite_count]
+
+            new_population = [schedule for score, schedule, result in elites]
+
+            while len(new_population) < population_size:
+                parent1 = random.choice(elites)[1]
+                parent2 = random.choice(elites)[1]
+
+                child = self.crossover_schedules(parent1, parent2)
+                child = self.mutate_schedule(child)
+
+                new_population.append(child)
+
+            population = new_population
+
+        return best_schedule, best_result, best_score
 
 # ---------------------------
 # TEST RUN
@@ -291,8 +428,9 @@ C:\\DSSAT48\\Maize\\UKLE2102.MZX                                                
 if __name__ == "__main__":
     sim = MaizeSimulator()
 
-    best_schedule, best_result, best_score = sim.find_best_schedule(
-        num_simulations=50
+    best_schedule, best_result, best_score = sim.evolutionary_search(
+    population_size=20,
+    generations=10
     )
 
     print("\nBEST SCHEDULE FOUND:")
