@@ -1,0 +1,108 @@
+*EXP.DETAILS: UKLE2102MZ 2020-2021 COVER CROP/MAIZE SEQUENCE (IN LTE)
+
+*GENERAL
+@PEOPLE
+Hanna Poffenbarger, Montse Salmeron, Patricia Moreno
+@ADDRESS
+Splindetop farm, University of Kentucky
+@SITE
+latitude 38.1233333333333, longitude -84.4972222222222, elevation 267
+
+*TREATMENTS                        -------------FACTOR LEVELS------------
+@N R O C TNAME.................... CU FL SA IC MP MI MF MR MC MT ME MH SM
+ 1 1 0 0 BA                         1  1  1  1  1  0  1  0  0  1  0  0  1
+
+*CULTIVARS
+@C CR INGENO CNAME
+ 1 MZ AG0001 A6544VT2RIB
+
+*FIELDS
+@L ID_FIELD WSTA....  FLSA  FLOB  FLDT  FLDD  FLDS  FLST SLTX  SLDP  ID_SOIL    FLNAME
+ 1 UKBL0001 UKLE       -99   -99   -99   -99   -99   -99 SIL    -99  IB00000001 -99
+@L ...........XCRD ...........YCRD .....ELEV .............AREA .SLEN .FLWR .SLAS FLHST FHDUR
+ 1             -99             -99       -99               -99   -99   -99   -99   -99   -99
+
+*SOIL ANALYSIS
+@A SADAT  SMHB  SMPX  SMKE  SANAME
+ 1 22001 SA011   -99 SA013  168N
+@A  SABL  SADM  SAOC  SANI SAPHW SAPHB  SAPX  SAKE  SASC
+ 1     5   1.3  1.14   .12   5.9   6.6  37.8 141.4   .93
+ 1    10   1.3  1.14   .12   5.9   6.6  37.8 141.4   .93
+ 1    15   1.3  1.14   .12   5.9   6.6  37.8 141.4   .93
+ 1    20   1.3   .91    .1     6   6.8  47.6 115.9   .61
+ 1    30   1.3   .91    .1     6   6.8  47.6 115.9   .61
+ 1    40   1.5   .36   .06     6   6.8  47.6 115.9   .30
+ 1    50   1.5   .36   .06     6   6.8  47.6 115.9   .30
+ 1    60   1.5   .36   .06     6   6.8  47.6 115.9   .30
+ 1    70   1.5   .18   .03     6   6.8  47.6 115.9   .13
+ 1    90   1.5   .18   .03     6   6.8  47.6 115.9   .13
+ 1   120   1.5   .12   .02     6   6.8  47.6 115.9   .09
+ 1   150   1.5   .12   .02     6   6.8  47.6 115.9   .09
+ 1   180   1.5   .12   .02     6   6.8  47.6 115.9   .09
+
+*INITIAL CONDITIONS
+@C   PCR ICDAT  ICRT  ICND  ICRN  ICRE  ICWD ICRES ICREN ICREP ICRIP ICRID ICNAME
+ 1    MZ 22001   -99   -99     1     1   -99   -99   -99   -99   -99   -99 Rye 168N
+@C  ICBL  SH2O  SNH4  SNO3
+ 1     5  .307   1.5   1.5
+ 1    10  .307   1.5   1.5
+ 1    15  .307   1.5   1.5
+ 1    20  .294   1.1   1.5
+ 1    30  .294   1.1   1.5
+ 1    40  .329     1    .9
+ 1    50  .329     1    .9
+ 1    60  .329     1    .9
+ 1    70  .333     1    .9
+ 1    90  .335     1    .9
+ 1   120  .329     1    .9
+ 1   150  .329     1    .9
+ 1   180  .323     1    .9
+
+*PLANTING DETAILS
+@P PDATE EDATE  PPOP  PPOE  PLME  PLDS  PLRS  PLRD  PLDP  PLWT  PAGE  PENV  PLPH  SPRL                        PLNAME
+ 1 22134 22141   7.8   -99     S     R    76    90   4.2   -99   -99   -99   -99   -99                        -99
+
+*FERTILIZERS (INORGANIC)
+@F FDATE  FMCD  FACD  FDEP  FAMN  FAMP  FAMK  FAMC  FAMO  FOCD FERNAME
+ 1 22161 FE005 AP001     0   183       0     0     0     0   -99 UREA
+*RESIDUES AND ORGANIC FERTILIZER
+@R RDATE  RCOD  RAMT  RESN  RESP  RESK  RINP  RDEP  RMET RENAME
+ 1 22001   -99   -99   -99   -99   -99   -99   -99   -99 -99
+
+*TILLAGE AND ROTATIONS
+@T TDATE TIMPL  TDEP TNAME
+ 1 22133 TI003    20 -99
+ 1 22134 TI009   7.5 -99
+ 1 22134 TI009   7.5 -99
+ 1 22134 TI009   7.5 -99
+
+*HARVEST DETAILS
+@H HDATE  HSTG  HCOM HSIZE   HPC  HBPC HNAME
+ 1 22272 GS000     H   -99   -99   -99 Maize
+
+*SIMULATION CONTROLS
+@N GENERAL     NYERS NREPS START SDATE RSEED SNAME.................... SMODEL
+ 1 GE              1     1     S 22001  2150 DEFAULT SIMULATION CONTR  MZCER
+@N OPTIONS     WATER NITRO SYMBI PHOSP POTAS DISES  CHEM  TILL   CO2
+ 1 OP              Y     Y     N     N     N     N     N     Y     M
+@N METHODS     WTHER INCON LIGHT EVAPO INFIL PHOTO HYDRO NSWIT MESOM MESEV MESOL
+ 1 ME              M     M     E     F     S     C     R     1     P     R     3
+@N MANAGEMENT  PLANT IRRIG FERTI RESID HARVS
+ 1 MA              R     N     R     N     A
+@N OUTPUTS     FNAME OVVEW SUMRY FROPT GROUT CAOUT WAOUT NIOUT MIOUT DIOUT VBOSE CHOUT OPOUT FMOPT
+ 1 OU              N     Y     Y     1     Y     Y     Y     Y     Y     N     Y     N     Y     A
+
+@  AUTOMATIC MANAGEMENT
+@N PLANTING    PFRST PLAST PH2OL PH2OU PH2OD PSTMX PSTMN
+ 1 PL          22001 22001    40   100    30    40    10
+@N IRRIGATION  IMDEP ITHRL ITHRU IROFF IMETH IRAMT IREFF
+ 1 IR             30    50   100 GS000 IR001    10     1
+@N NITROGEN    NMDEP NMTHR NAMNT NCODE NAOFF
+ 1 NI             30    50    25 FE001 GS000
+@N RESIDUES    RIPCN RTIME RIDEP
+ 1 RE            100     1    20
+@N HARVEST     HFRST HLAST HPCNP HPCNR
+ 1 HA              0 02001   100     0
+
+
+
