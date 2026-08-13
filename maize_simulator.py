@@ -57,11 +57,19 @@ class MaizeSimulator:
         self.max_total_n = 300
         self.max_n_per_application = 300
         self.n_step = 1
+        self.min_n_per_application = 20
+
+        # Reference value used to normalize yield in the objective function
+        self.reference_yield = 13000
 
         # Default year / fertilizer window
         self.year = 2021
         self.min_fert_date = 21140
         self.max_fert_date = 21227
+
+        # Evolutionary algorithm settings
+        self.elite_fraction = 0.10
+        self.mutation_rate = 0.30
 
     def set_year(self, year):
         self.year = year
@@ -143,6 +151,8 @@ class MaizeSimulator:
     def load_weather_data(self, year):
         weather_file = Path("weather") / f"UKLE{str(year)[2:]}01.WTH"
 
+        print(f"Loading weather file: {weather_file.resolve()}")
+
         if not weather_file.exists():
             raise FileNotFoundError(f"Weather file not found: {weather_file}")
 
@@ -190,6 +200,9 @@ class MaizeSimulator:
 
         df["weather_year"] = year
         df["TMEAN"] = (df["TMAX"] + df["TMIN"]) / 2
+
+        print(f"Weather year: {year}")
+        print(f"Weather file total rainfall: {df['RAIN'].sum():.2f} mm")
 
         return df
 
@@ -265,6 +278,10 @@ class MaizeSimulator:
         self.write_experiment_file(fertilizer_schedule)
         self.write_batch_file()
 
+        print(f"\nTesting schedule: {fertilizer_schedule}")
+        print(f"Weather year: {self.year}")
+        print(f"Experiment file: {self.output_exp}")
+
         dssat_output = self.run_dssat()
         result = self.extract_summary_outputs(dssat_output)
 
@@ -276,7 +293,9 @@ class MaizeSimulator:
 
         estimated_n_loss = initial_niad + total_n - final_niad - result["TNUP"]
 
-        result["estimated_n_loss"] = max(0, estimated_n_loss) # Forces negative values to zero
+        result["estimated_n_loss"] = max(
+            0, estimated_n_loss
+        )  # Forces negative values to zero
         result["montse_n_loss_proxy"] = total_n - result["TNUP"]
 
         return result
@@ -307,17 +326,31 @@ class MaizeSimulator:
     def is_valid_schedule(self, schedule):
         total_n = self.get_total_n_applied(schedule)
 
-        # Single event application can be as large as the entire budget
+        # Total N cannot exceed the fertilizer budget
         if total_n > self.max_total_n:
             return False
 
+        # Cannot have too many applications
         if len(schedule) > self.max_applications:
             return False
 
+        # Make sure there are no duplicate application dates
+        dates = [date for date, amount in schedule]
+
+        if len(dates) != len(set(dates)):
+            return False
+
+        # Check each individual application
         for date, amount in schedule:
-            if amount > self.max_n_per_application:
+            # Amount must be above minimum
+            if amount < self.min_n_per_application:
                 return False
 
+            # Amount must be within allowed limits
+            if amount < self.n_step or amount > self.max_n_per_application:
+                return False
+
+            # Date must be within allowed fertilizer window
             if date < self.min_fert_date or date > self.max_fert_date:
                 return False
 
@@ -362,28 +395,60 @@ class MaizeSimulator:
     # ---------------------------
     # 3. Schedule generation
     # ---------------------------
+    # def generate_random_schedule(self):
+    #     num_apps = random.randint(1, self.max_applications)
+
+    #     possible_dates = list(range(self.min_fert_date, self.max_fert_date + 1))
+    #     selected_dates = sorted(random.sample(possible_dates, num_apps))
+
+    #     schedule = []
+
+    #     remaining_n = self.max_total_n
+
+    #     for date in selected_dates:
+    #         max_amount = min(self.max_n_per_application, remaining_n)
+
+    #         if max_amount <= 0:
+    #             amount = 0
+    #         else:
+    #             amount = random.choice(
+    #                 range(self.n_step, int(max_amount) + 1, self.n_step)
+    #             )
+
+    #         schedule.append((date, amount))
+    #         remaining_n -= amount
+
+    #     return schedule
+
     def generate_random_schedule(self):
+        # Randomly choose how many fertilizer applications to make
         num_apps = random.randint(1, self.max_applications)
 
+        # Randomly choose unique application dates
         possible_dates = list(range(self.min_fert_date, self.max_fert_date + 1))
         selected_dates = sorted(random.sample(possible_dates, num_apps))
 
-        schedule = []
+        # Randomly choose how much of the available N budget
+        # this particular schedule will use
+        total_n = random.randint(self.n_step, self.max_total_n)
 
-        remaining_n = self.max_total_n
+        # Generate one random weight for every selected date
+        weights = [random.random() for _ in range(num_apps)]
 
-        for date in selected_dates:
-            max_amount = min(self.max_n_per_application, remaining_n)
+        # Scale the weights so they sum to total_n
+        weight_sum = sum(weights)
 
-            if max_amount <= 0:
-                amount = 0
-            else:
-                amount = random.choice(
-                    range(self.n_step, int(max_amount) + 1, self.n_step)
-                )
+        amounts = [(weight / weight_sum) * total_n for weight in weights]
 
-            schedule.append((date, amount))
-            remaining_n -= amount
+        # Convert amounts to your N step
+        amounts = [round(amount / self.n_step) * self.n_step for amount in amounts]
+
+        # Correct any rounding difference so amounts sum exactly to total_n
+        difference = total_n - sum(amounts)
+
+        amounts[-1] += difference
+
+        schedule = list(zip(selected_dates, amounts))
 
         return schedule
 
@@ -392,62 +457,128 @@ class MaizeSimulator:
     # ---------------------------
 
     def score_result(self, result, total_n):
+        normalized_yield = result["HARWT"] / self.reference_yield
+        normalized_n = total_n / self.max_total_n
+
+        score = 0.5 * normalized_yield - 0.5 * normalized_n
+
+        return score
+
         # score = result["HARWT"]
 
-        score = result["HARWT"] - total_n
+        # score = result["HARWT"] - total_n
 
         # score = result["HARWT"] - (total_n - result["TNUP"])
 
         # score = result["HARWT"] - result["TNLF"]
 
-        return score
-
     def mutate_schedule(self, schedule):
-        possible_dates = list(range(self.min_fert_date, self.max_fert_date + 1))
-        possible_amounts = list(
-            range(self.n_step, self.max_n_per_application + 1, self.n_step)
-        )
-
         new_schedule = schedule.copy()
+
         mutation_type = random.choice(["change_amount", "change_date", "add", "remove"])
 
+        # -----------------------------------
+        # Change an existing fertilizer amount
+        # -----------------------------------
         if mutation_type == "change_amount" and new_schedule:
             i = random.randrange(len(new_schedule))
             date, amount = new_schedule[i]
-            new_schedule[i] = (date, random.choice(possible_amounts))
 
+            # Small change instead of complete random replacement
+            change = random.randint(-20, 20)
+            new_amount = amount + change
+
+            # Keep amount inside allowed limits
+            new_amount = max(self.n_step, min(new_amount, self.max_n_per_application))
+
+            new_schedule[i] = (date, new_amount)
+
+        # -----------------------------------
+        # Move an application a few days
+        # -----------------------------------
         elif mutation_type == "change_date" and new_schedule:
             i = random.randrange(len(new_schedule))
             date, amount = new_schedule[i]
-            new_schedule[i] = (random.choice(possible_dates), amount)
 
+            # Move by at most 7 days
+            shift = random.randint(-7, 7)
+
+            new_date = date + shift
+
+            new_date = max(self.min_fert_date, min(new_date, self.max_fert_date))
+
+            new_schedule[i] = (new_date, amount)
+
+        # -----------------------------------
+        # Add a new small/moderate application
+        # -----------------------------------
         elif mutation_type == "add" and len(new_schedule) < self.max_applications:
-            new_schedule.append(
-                (random.choice(possible_dates), random.choice(possible_amounts))
-            )
 
+            existing_dates = {date for date, amount in new_schedule}
+
+            available_dates = [
+                date
+                for date in range(self.min_fert_date, self.max_fert_date + 1)
+                if date not in existing_dates
+            ]
+
+            if available_dates:
+                remaining_n = self.max_total_n - self.get_total_n_applied(new_schedule)
+
+                if remaining_n >= self.n_step:
+                    new_date = random.choice(available_dates)
+
+                    max_add = min(remaining_n, 40)
+
+                    new_amount = random.randint(self.n_step, max_add)
+
+                    new_schedule.append((new_date, new_amount))
+
+        # -----------------------------------
+        # Remove an application
+        # -----------------------------------
         elif mutation_type == "remove" and len(new_schedule) > 1:
             i = random.randrange(len(new_schedule))
             new_schedule.pop(i)
 
-        schedule_dict = {}
-        for date, amount in new_schedule:
-            schedule_dict[date] = amount
-
-        return sorted(schedule_dict.items())
+        return sorted(new_schedule)
 
     def crossover_schedules(self, parent1, parent2):
-        combined = parent1 + parent2
-        random.shuffle(combined)
+        parent1_dict = dict(parent1)
+        parent2_dict = dict(parent2)
 
-        child = combined[: random.randint(1, min(self.max_applications, len(combined)))]
+        all_dates = sorted(set(parent1_dict.keys()) | set(parent2_dict.keys()))
 
-        # Remove duplicate dates
-        schedule_dict = {}
-        for date, amount in child:
-            schedule_dict[date] = amount
+        child = []
 
-        return sorted(schedule_dict.items())
+        for date in all_dates:
+
+            # If both parents apply fertilizer on this date,
+            # randomly inherit one parent's amount
+            if date in parent1_dict and date in parent2_dict:
+                amount = random.choice([parent1_dict[date], parent2_dict[date]])
+
+            # If only one parent has this date,
+            # inherit it with 50% probability
+            elif date in parent1_dict:
+                if random.random() < 0.5:
+                    amount = parent1_dict[date]
+                else:
+                    continue
+
+            else:
+                if random.random() < 0.5:
+                    amount = parent2_dict[date]
+                else:
+                    continue
+
+            child.append((date, amount))
+
+        # Make sure child is never empty
+        if not child:
+            child = [random.choice(parent1 + parent2)]
+
+        return sorted(child)
 
     def evolutionary_search(self, population_size=100, generations=50):
         population = []
@@ -528,21 +659,38 @@ class MaizeSimulator:
             print("Result:", worst_gen_result)
             print("Score:", worst_gen_score)
 
-            # Keep top 25%
-            elite_count = max(2, population_size // 4)
+            # Keep the best-performing schedules unchanged
+            elite_count = max(2, int(population_size * self.elite_fraction))
+
             elites = evaluated[:elite_count]
 
             new_population = [schedule for score, schedule, result in elites]
 
+            # Extract schedules from elite group
+            elite_schedules = [schedule for score, schedule, result in elites]
+
+            # Higher-ranked elites have a greater chance of reproducing
+            parent_weights = list(range(len(elite_schedules), 0, -1))
+
+            # Generate the rest of the next population
             while len(new_population) < population_size:
-                parent1 = random.choice(elites)[1]
-                parent2 = random.choice(elites)[1]
 
+                # Select two parents using rank-weighted selection
+                parent1, parent2 = random.choices(
+                    elite_schedules, weights=parent_weights, k=2
+                )
+
+                # Combine information from both parents
                 child = self.crossover_schedules(parent1, parent2)
-                child = self.mutate_schedule(child)
 
-                while not self.is_valid_schedule(child):
+                # Mutate only some children
+                if random.random() < self.mutation_rate:
                     child = self.mutate_schedule(child)
+
+                # If crossover/mutation produced an invalid schedule,
+                # keep one of the valid parents instead
+                if not self.is_valid_schedule(child):
+                    child = random.choice([parent1, parent2]).copy()
 
                 new_population.append(child)
 
@@ -1588,7 +1736,7 @@ class MaizeSimulator:
 
         # Round numerical outputs for readability
         top_df["HARWT"] = top_df["HARWT"].round(1)
-        top_df["score"] = top_df["score"].round(1)
+        top_df["score"] = top_df["score"].round(4)
         top_df["TNUP"] = top_df["TNUP"].round(1)
         top_df["TNLF"] = top_df["TNLF"].round(1)
         top_df["NUE"] = top_df["NUE"].round(1)
