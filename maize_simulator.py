@@ -19,7 +19,12 @@ class MaizeSimulator:
 
     # Clearing Old Outputs
     def clear_dssat_outputs(self):
-        for filename in ["Summary.OUT", "SoilNi.OUT", "WARNING.OUT"]:
+        for filename in [
+            "Summary.OUT",
+            "SoilNi.OUT",
+            "PlantGro.OUT",
+            "WARNING.OUT",
+        ]:
             path = self.dssat_root / filename
 
             if path.exists():
@@ -62,22 +67,30 @@ class MaizeSimulator:
         # Reference value used to normalize yield in the objective function
         self.reference_yield = 13000
 
-        # Default year / fertilizer window
+        # Fertilizer search window in DOY
+        self.min_fert_doy = 134
+        self.max_fert_doy = 227
+
+        # Default year
         self.year = 2021
-        self.min_fert_date = 21140
-        self.max_fert_date = 21227
 
         # Evolutionary algorithm settings
         self.elite_fraction = 0.10
         self.mutation_rate = 0.30
 
+        # Initialize year-dependent paths and fertilizer dates
+        self.set_year(self.year)
+
     def set_year(self, year):
         self.year = year
         yy = year % 100
 
+        # Experiment file
         self.output_exp = self.maize_dir / f"UKLE{yy}02.MZX"
-        self.min_fert_date = int(f"{yy}140")
-        self.max_fert_date = int(f"{yy}227")
+
+        # Convert DOY window to DSSAT YYDDD format
+        self.min_fert_date = int(f"{yy:02d}{self.min_fert_doy:03d}")
+        self.max_fert_date = int(f"{yy:02d}{self.max_fert_doy:03d}")
 
     # def convert_dssat_date_to_year(self, value):
     #     value = str(value)
@@ -304,7 +317,12 @@ class MaizeSimulator:
         output_dir = Path("output") / "dssat_outputs" / str(self.year)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        output_files = ["Summary.OUT", "SoilNi.OUT", "WARNING.OUT"]
+        output_files = [
+            "Summary.OUT",
+            "SoilNi.OUT",
+            "PlantGro.OUT",
+            "WARNING.OUT",
+        ]
 
         for filename in output_files:
             source = self.dssat_root / filename
