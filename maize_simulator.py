@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import re
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+import numpy as np
 
 
 class MaizeSimulator:
@@ -64,6 +65,10 @@ class MaizeSimulator:
         self.n_step = 1
         self.min_n_per_application = 20
 
+        # Fixed reference for objective normalization
+        # This stays 300 even when an experiment uses a smaller N budget
+        self.objective_n_reference = 300
+
         # Reference value used to normalize yield in the objective function
         self.reference_yield = 13000
 
@@ -91,14 +96,6 @@ class MaizeSimulator:
         # Convert DOY window to DSSAT YYDDD format
         self.min_fert_date = int(f"{yy:02d}{self.min_fert_doy:03d}")
         self.max_fert_date = int(f"{yy:02d}{self.max_fert_doy:03d}")
-
-    # def convert_dssat_date_to_year(self, value):
-    #     value = str(value)
-
-    #     if len(value) == 5 and value.startswith("21"):
-    #         return f"{self.year % 100:02d}{value[2:]}"
-
-    #     return value
 
     def replace_fertilizer_block(self, fertilizer_schedule):
         """
@@ -411,64 +408,105 @@ class MaizeSimulator:
         return datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
 
     # ---------------------------
-    # 3. Schedule generation
+    # 3. Differential Evolution schedule utilities
     # ---------------------------
-    # def generate_random_schedule(self):
-    #     num_apps = random.randint(1, self.max_applications)
 
-    #     possible_dates = list(range(self.min_fert_date, self.max_fert_date + 1))
-    #     selected_dates = sorted(random.sample(possible_dates, num_apps))
+    def get_decision_dates(self):
+        """
+        Every day in the allowable fertilizer window is one vector dimension.
+        """
+        return list(range(self.min_fert_date, self.max_fert_date + 1))
 
-    #     schedule = []
+    def generate_random_vector(self):
+        """
+        Generate one fertilizer strategy as a fixed-length vector.
 
-    #     remaining_n = self.max_total_n
+        Each position corresponds to one allowable fertilizer date.
+        The value is kg N/ha applied on that date.
+        """
 
-    #     for date in selected_dates:
-    #         max_amount = min(self.max_n_per_application, remaining_n)
+        decision_dates = self.get_decision_dates()
+        vector = np.zeros(len(decision_dates), dtype=float)
 
-    #         if max_amount <= 0:
-    #             amount = 0
-    #         else:
-    #             amount = random.choice(
-    #                 range(self.n_step, int(max_amount) + 1, self.n_step)
-    #             )
-
-    #         schedule.append((date, amount))
-    #         remaining_n -= amount
-
-    #     return schedule
-
-    def generate_random_schedule(self):
-        # Randomly choose how many fertilizer applications to make
         num_apps = random.randint(1, self.max_applications)
 
-        # Randomly choose unique application dates
-        possible_dates = list(range(self.min_fert_date, self.max_fert_date + 1))
-        selected_dates = sorted(random.sample(possible_dates, num_apps))
+        selected_indices = random.sample(range(len(decision_dates)), num_apps)
 
-        # Randomly choose how much of the available N budget
-        # this particular schedule will use
-        total_n = random.randint(self.n_step, self.max_total_n)
+        remaining_n = self.max_total_n
 
-        # Generate one random weight for every selected date
-        weights = [random.random() for _ in range(num_apps)]
+        for idx in selected_indices:
+            max_amount = min(self.max_n_per_application, remaining_n)
 
-        # Scale the weights so they sum to total_n
-        weight_sum = sum(weights)
+            # Stop if there is not enough N left for a valid application
+            if max_amount < self.min_n_per_application:
+                break
 
-        amounts = [(weight / weight_sum) * total_n for weight in weights]
+            amount = random.choice(
+                range(
+                    self.min_n_per_application,
+                    int(max_amount) + 1,
+                    self.n_step,
+                )
+            )
+            vector[idx] = amount
+            remaining_n -= amount
 
-        # Convert amounts to your N step
-        amounts = [round(amount / self.n_step) * self.n_step for amount in amounts]
+        return vector
 
-        # Correct any rounding difference so amounts sum exactly to total_n
-        difference = total_n - sum(amounts)
+    def vector_to_schedule(self, vector):
+        decision_dates = self.get_decision_dates()
 
-        amounts[-1] += difference
+        schedule = []
 
-        schedule = list(zip(selected_dates, amounts))
+        for date, amount in zip(decision_dates, vector):
+            amount = int(round(amount / self.n_step) * self.n_step)
+
+            if amount >= self.min_n_per_application:
+                schedule.append((date, amount))
 
         return schedule
+
+    def repair_vector(self, vector):
+        vector = np.array(vector, dtype=float).copy()
+
+        # No negative fertilizer and no application above maximum
+        vector = np.clip(vector, 0, self.max_n_per_application)
+
+        # Round to allowed N increments
+        vector = np.round(vector / self.n_step) * self.n_step
+
+        # Anything below minimum application size becomes zero
+        vector[(vector > 0) & (vector < self.min_n_per_application)] = 0
+
+        # Keep only the largest allowed number of applications
+        nonzero_indices = np.where(vector > 0)[0]
+
+        if len(nonzero_indices) > self.max_applications:
+            sorted_indices = nonzero_indices[np.argsort(vector[nonzero_indices])[::-1]]
+
+            keep_indices = sorted_indices[: self.max_applications]
+
+            mask = np.zeros(len(vector), dtype=bool)
+            mask[keep_indices] = True
+
+            vector[~mask] = 0
+
+        # Enforce total N budget
+        total_n = np.sum(vector)
+
+        if total_n > self.max_total_n:
+            vector *= self.max_total_n / total_n
+
+            vector = np.round(vector / self.n_step) * self.n_step
+
+            vector[(vector > 0) & (vector < self.min_n_per_application)] = 0
+
+        # Ensure at least one valid fertilizer application remains
+        if np.count_nonzero(vector) == 0:
+            random_index = random.randrange(len(vector))
+            vector[random_index] = self.min_n_per_application
+
+        return vector
 
     # ---------------------------
     # 4. Scoring / optimization
@@ -476,8 +514,7 @@ class MaizeSimulator:
 
     def score_result(self, result, total_n):
         normalized_yield = result["HARWT"] / self.reference_yield
-        normalized_n = total_n / self.max_total_n
-
+        normalized_n = total_n / self.objective_n_reference
         score = 0.5 * normalized_yield - 0.5 * normalized_n
 
         return score
@@ -490,134 +527,88 @@ class MaizeSimulator:
 
         # score = result["HARWT"] - result["TNLF"]
 
-    def mutate_schedule(self, schedule):
-        new_schedule = schedule.copy()
+    def differential_mutation(self, population, target_idx, F=0.5):
+        """
+        Jackson-inspired differential mutation.
 
-        mutation_type = random.choice(["change_amount", "change_date", "add", "remove"])
+        mutant = current + F * (best - current + v1 - v2)
+        """
 
-        # -----------------------------------
-        # Change an existing fertilizer amount
-        # -----------------------------------
-        if mutation_type == "change_amount" and new_schedule:
-            i = random.randrange(len(new_schedule))
-            date, amount = new_schedule[i]
+        population_size = len(population)
 
-            # Small change instead of complete random replacement
-            change = random.randint(-20, 20)
-            new_amount = amount + change
+        # Evaluate / rank population outside this function and place
+        # the best individual at index 0.
+        best = population[0]
+        current = population[target_idx]
 
-            # Keep amount inside allowed limits
-            new_amount = max(self.n_step, min(new_amount, self.max_n_per_application))
+        available = [i for i in range(population_size) if i != target_idx]
 
-            new_schedule[i] = (date, new_amount)
+        idx1, idx2 = random.sample(available, 2)
 
-        # -----------------------------------
-        # Move an application a few days
-        # -----------------------------------
-        elif mutation_type == "change_date" and new_schedule:
-            i = random.randrange(len(new_schedule))
-            date, amount = new_schedule[i]
+        v1 = population[idx1]
+        v2 = population[idx2]
 
-            # Move by at most 7 days
-            shift = random.randint(-7, 7)
+        mutant = current + F * (best - current + v1 - v2)
 
-            new_date = date + shift
+        return self.repair_vector(mutant)
 
-            new_date = max(self.min_fert_date, min(new_date, self.max_fert_date))
+    def vector_crossover(self, parent, mutant, CR=0.5):
+        """
+        Binomial crossover based on Jackson's DE implementation.
+        """
 
-            new_schedule[i] = (new_date, amount)
+        offspring = parent.copy()
 
-        # -----------------------------------
-        # Add a new small/moderate application
-        # -----------------------------------
-        elif mutation_type == "add" and len(new_schedule) < self.max_applications:
+        # Ensure at least one mutant component is inherited
+        forced_index = random.randrange(len(parent))
 
-            existing_dates = {date for date, amount in new_schedule}
+        for j in range(len(parent)):
+            if random.random() < CR or j == forced_index:
+                offspring[j] = mutant[j]
 
-            available_dates = [
-                date
-                for date in range(self.min_fert_date, self.max_fert_date + 1)
-                if date not in existing_dates
-            ]
+        return self.repair_vector(offspring)
 
-            if available_dates:
-                remaining_n = self.max_total_n - self.get_total_n_applied(new_schedule)
+    def evolutionary_search(
+        self, population_size=100, generations=50, F=0.5, CR=0.5, seed=None
+    ):
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
 
-                if remaining_n >= self.n_step:
-                    new_date = random.choice(available_dates)
+        print(f"Random seed: {seed}")
+        """
+        Jackson-inspired Differential Evolution optimizer.
+        """
 
-                    max_add = min(remaining_n, 40)
+        # ---------------------------
+        # Initialize population
+        # ---------------------------
 
-                    new_amount = random.randint(self.n_step, max_add)
-
-                    new_schedule.append((new_date, new_amount))
-
-        # -----------------------------------
-        # Remove an application
-        # -----------------------------------
-        elif mutation_type == "remove" and len(new_schedule) > 1:
-            i = random.randrange(len(new_schedule))
-            new_schedule.pop(i)
-
-        return sorted(new_schedule)
-
-    def crossover_schedules(self, parent1, parent2):
-        parent1_dict = dict(parent1)
-        parent2_dict = dict(parent2)
-
-        all_dates = sorted(set(parent1_dict.keys()) | set(parent2_dict.keys()))
-
-        child = []
-
-        for date in all_dates:
-
-            # If both parents apply fertilizer on this date,
-            # randomly inherit one parent's amount
-            if date in parent1_dict and date in parent2_dict:
-                amount = random.choice([parent1_dict[date], parent2_dict[date]])
-
-            # If only one parent has this date,
-            # inherit it with 50% probability
-            elif date in parent1_dict:
-                if random.random() < 0.5:
-                    amount = parent1_dict[date]
-                else:
-                    continue
-
-            else:
-                if random.random() < 0.5:
-                    amount = parent2_dict[date]
-                else:
-                    continue
-
-            child.append((date, amount))
-
-        # Make sure child is never empty
-        if not child:
-            child = [random.choice(parent1 + parent2)]
-
-        return sorted(child)
-
-    def evolutionary_search(self, population_size=100, generations=50):
-        population = []
-
-        while len(population) < population_size:
-            schedule = self.generate_random_schedule()
-
-            if self.is_valid_schedule(schedule):
-                population.append(schedule)
+        population = np.array(
+            [self.generate_random_vector() for _ in range(population_size)]
+        )
 
         best_schedule = None
         best_result = None
         best_score = float("-inf")
+
         convergence_history = []
 
+        # ---------------------------
+        # Evolution loop
+        # ---------------------------
+
         for gen in range(generations):
+
             print(f"\nGENERATION {gen + 1}/{generations}")
 
             evaluated = []
 
-            for i, schedule in enumerate(population):
+            # Evaluate current population
+            for vector in population:
+
+                schedule = self.vector_to_schedule(vector)
+
                 result = self.evaluate_candidate(schedule)
 
                 total_n = self.get_total_n_applied(schedule)
@@ -626,144 +617,285 @@ class MaizeSimulator:
 
                 self.save_result_to_csv(schedule, result)
 
-                evaluated.append((score, schedule, result))
+                evaluated.append((score, vector.copy(), schedule, result))
 
                 if score > best_score:
                     best_score = score
                     best_schedule = schedule
                     best_result = result
+
                     print("New best schedule found!")
                     print(best_schedule, best_result, best_score)
 
+            # Sort best -> worst
             evaluated.sort(reverse=True, key=lambda x: x[0])
 
-            self.top_schedules = evaluated[:3]
+            # Rebuild population in fitness order.
+            # This makes population[0] the current best,
+            # which differential_mutation() uses.
+            population = np.array([item[1] for item in evaluated])
 
-            # Print best and worst schedules
-            best_gen_score, best_gen_schedule, best_gen_result = evaluated[0]
-            worst_gen_score, worst_gen_schedule, worst_gen_result = evaluated[-1]
+            scores = [item[0] for item in evaluated]
 
-            unique_schedules = {
-                tuple(schedule) for score, schedule, result in evaluated
-            }
+            new_population = population.copy()
 
-            near_optimal_count = sum(
-                1
-                for score, schedule, result in evaluated
-                if score >= 0.95 * best_gen_score
-            )
+            # ---------------------------
+            # Mutation + crossover + selection
+            # ---------------------------
+
+            for i in range(population_size):
+
+                parent = population[i]
+
+                mutant = self.differential_mutation(population, i, F=F)
+
+                offspring = self.vector_crossover(parent, mutant, CR=CR)
+
+                offspring_schedule = self.vector_to_schedule(offspring)
+
+                print("OFFSPRING SCHEDULE BEFORE DSSAT:", offspring_schedule)
+                offspring_result = self.evaluate_candidate(offspring_schedule)
+
+                offspring_total_n = self.get_total_n_applied(offspring_schedule)
+
+                offspring_score = self.score_result(offspring_result, offspring_total_n)
+
+                self.save_result_to_csv(offspring_schedule, offspring_result)
+
+                parent_score = scores[i]
+
+                # DE selection:
+                # offspring survives only if it is at least as good
+                if offspring_score >= parent_score:
+                    new_population[i] = offspring
+
+                    if offspring_score > best_score:
+                        best_score = offspring_score
+                        best_schedule = offspring_schedule
+                        best_result = offspring_result
+
+                        print("New best schedule found!")
+                        print(best_schedule, best_result, best_score)
+
+            population = new_population
+
+            # ---------------------------
+            # Generation summary
+            # ---------------------------
 
             convergence_history.append(
                 {
                     "generation": gen + 1,
-                    "best_generation_score": best_gen_score,
                     "best_overall_score": best_score,
-                    "best_generation_yield": best_gen_result["HARWT"],
-                    "best_generation_total_n": self.get_total_n_applied(
-                        best_gen_schedule
+                    "best_overall_yield": (
+                        best_result["HARWT"] if best_result is not None else None
                     ),
-                    "unique_schedules": len(unique_schedules),
-                    "near_optimal_schedules": near_optimal_count,
+                    "best_overall_total_n": (
+                        self.get_total_n_applied(best_schedule)
+                        if best_schedule is not None
+                        else None
+                    ),
                 }
             )
 
-            print("\nBEST OF GENERATION")
-            print("Schedule:", best_gen_schedule)
-            print("Result:", best_gen_result)
-            print("Score:", best_gen_score)
-
-            print("\nWORST OF GENERATION")
-            print("Schedule:", worst_gen_schedule)
-            print("Result:", worst_gen_result)
-            print("Score:", worst_gen_score)
-
-            # Keep the best-performing schedules unchanged
-            elite_count = max(2, int(population_size * self.elite_fraction))
-
-            elites = evaluated[:elite_count]
-
-            new_population = [schedule for score, schedule, result in elites]
-
-            # Extract schedules from elite group
-            elite_schedules = [schedule for score, schedule, result in elites]
-
-            # Higher-ranked elites have a greater chance of reproducing
-            parent_weights = list(range(len(elite_schedules), 0, -1))
-
-            # Generate the rest of the next population
-            while len(new_population) < population_size:
-
-                # Select two parents using rank-weighted selection
-                parent1, parent2 = random.choices(
-                    elite_schedules, weights=parent_weights, k=2
-                )
-
-                # Combine information from both parents
-                child = self.crossover_schedules(parent1, parent2)
-
-                # Mutate only some children
-                if random.random() < self.mutation_rate:
-                    child = self.mutate_schedule(child)
-
-                # If crossover/mutation produced an invalid schedule,
-                # keep one of the valid parents instead
-                if not self.is_valid_schedule(child):
-                    child = random.choice([parent1, parent2]).copy()
-
-                new_population.append(child)
-
-            population = new_population
-
-        evaluated.sort(reverse=True, key=lambda x: x[0])
-
-        print("\nFINAL GENERATION BEST")
-        print(evaluated[0])
-
-        print("\nFINAL GENERATION WORST")
-        print(evaluated[-1])
-
-        print("\nBEST OF GENERATION")
-        print(best_gen_schedule)
-
-        print("\nWORST OF GENERATION")
-        print(worst_gen_schedule)
+            print("\nBEST OVERALL")
+            print("Schedule:", best_schedule)
+            print("Result:", best_result)
+            print("Score:", best_score)
 
         pd.DataFrame(convergence_history).to_csv(
             f"output/convergence_history_{self.year}.csv", index=False
         )
 
+        # Re-run best schedule so DSSAT output files correspond
+        # to the final best candidate
         self.evaluate_candidate(best_schedule)
         self.save_best_dssat_output_files()
 
         return best_schedule, best_result, best_score
 
-    def find_best_schedule(self, num_simulations=50):
-        best_schedule = None
-        best_result = None
-        best_score = float("-inf")
+    def run_budget_seed_experiment(
+        self,
+        budget_percentages=None,
+        seeds=None,
+        population_size=100,
+        generations=50,
+        F=0.5,
+        CR=0.5,
+    ):
+        """
+        Run Vector-DE repeatedly across different nitrogen budgets
+        and random seeds.
 
-        for i in range(num_simulations):
-            schedule = self.generate_random_schedule()
-            result = self.evaluate_candidate(schedule)
+        Produces:
+        1. Raw result for every budget/seed combination
+        2. Summary statistics by N budget
+        3. Yield vs N-budget graph showing:
+                - every random-seed result
+                - mean yield
+                - +/- 1 standard deviation
+        """
 
-            # Higher yield is good, nitrogen loss is bad
-            score = result["HARWT"] - 100 * result["TNLF"]
+        if budget_percentages is None:
+            budget_percentages = [20, 30, 40, 50, 60, 70, 80, 90, 100]
 
-            self.save_result_to_csv(schedule, result)
+        if seeds is None:
+            seeds = list(range(1, 11))
 
-            print(f"\nRun {i + 1}/{num_simulations}")
-            print("Schedule:", schedule)
-            print("Result:", result)
-            print("Score:", score)
+        output_dir = Path("output") / "budget_seed_experiment" / str(self.year)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-            if score > best_score:
-                best_score = score
-                best_schedule = schedule
-                best_result = result
+        raw_file = output_dir / "budget_seed_results.csv"
+        summary_file = output_dir / "budget_seed_summary.csv"
 
-                print("New best schedule found!")
+        rows = []
 
-        return best_schedule, best_result, best_score
+        original_max_total_n = self.max_total_n
+
+        try:
+            for budget_pct in budget_percentages:
+
+                budget_n = int(round(self.objective_n_reference * budget_pct / 100))
+
+                print("\n" + "=" * 70)
+                print(f"N BUDGET: {budget_pct}% " f"({budget_n} kg N/ha)")
+                print("=" * 70)
+
+                self.max_total_n = budget_n
+
+                for seed in seeds:
+
+                    print("\n" + "-" * 60)
+                    print(f"Budget = {budget_pct}% | " f"Seed = {seed}")
+                    print("-" * 60)
+
+                    # Current optimizer result files can be cleared because
+                    # this experiment saves the BEST result separately.
+                    self.clear_optimizer_outputs()
+
+                    best_schedule, best_result, best_score = self.evolutionary_search(
+                        population_size=population_size,
+                        generations=generations,
+                        F=F,
+                        CR=CR,
+                        seed=seed,
+                    )
+
+                    total_n = self.get_total_n_applied(best_schedule)
+                    num_apps = len(best_schedule)
+
+                    avg_n_per_application = total_n / num_apps if num_apps > 0 else 0
+
+                    rows.append(
+                        {
+                            "weather_year": self.year,
+                            "budget_percent": budget_pct,
+                            "budget_n_kg_ha": budget_n,
+                            "seed": seed,
+                            "best_schedule": str(best_schedule),
+                            "total_n_used": total_n,
+                            "budget_used_percent": (
+                                total_n / budget_n * 100 if budget_n > 0 else 0
+                            ),
+                            "yield": best_result["HARWT"],
+                            "TNUP": best_result["TNUP"],
+                            "TNLF": best_result["TNLF"],
+                            "num_applications": num_apps,
+                            "avg_n_per_application": avg_n_per_application,
+                            "score": best_score,
+                        }
+                    )
+
+                    # Save after EVERY run so progress is not lost
+                    pd.DataFrame(rows).to_csv(raw_file, index=False)
+
+                    print("\nBEST FOR THIS RUN")
+                    print("Schedule:", best_schedule)
+                    print("Total N:", total_n)
+                    print("Yield:", best_result["HARWT"])
+                    print("Score:", best_score)
+
+        finally:
+            # Restore normal optimizer setting
+            self.max_total_n = original_max_total_n
+
+        df = pd.DataFrame(rows)
+
+        summary = (
+            df.groupby(["budget_percent", "budget_n_kg_ha"])
+            .agg(
+                mean_yield=("yield", "mean"),
+                std_yield=("yield", "std"),
+                mean_total_n_used=("total_n_used", "mean"),
+                std_total_n_used=("total_n_used", "std"),
+                mean_num_applications=("num_applications", "mean"),
+                std_num_applications=("num_applications", "std"),
+                mean_n_per_application=("avg_n_per_application", "mean"),
+                std_n_per_application=("avg_n_per_application", "std"),
+                mean_score=("score", "mean"),
+                std_score=("score", "std"),
+            )
+            .reset_index()
+        )
+
+        summary.to_csv(summary_file, index=False)
+
+        # --------------------------------------------------
+        # Yield vs N budget across random seeds
+        # --------------------------------------------------
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Show individual seed results
+        seed_offsets = np.linspace(-1.5, 1.5, len(seeds))
+
+        for offset, seed in zip(seed_offsets, seeds):
+            seed_df = df[df["seed"] == seed]
+
+            ax.scatter(
+                seed_df["budget_percent"] + offset,
+                seed_df["yield"],
+                alpha=0.35,
+                s=25,
+            )
+
+        # Mean +/- standard deviation
+        ax.errorbar(
+            summary["budget_percent"],
+            summary["mean_yield"],
+            yerr=summary["std_yield"].fillna(0),
+            fmt="o-",
+            linewidth=2,
+            capsize=5,
+            label="Mean Yield ± 1 SD",
+        )
+
+        ax.set_xlabel("Maximum Nitrogen Budget Allowed (%)")
+        ax.set_ylabel("Optimized Yield (kg/ha)")
+
+        ax.set_title("Optimized Maize Yield vs Nitrogen Budget\n" "Across Random Seeds")
+
+        ax.set_xticks(budget_percentages)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        fig.tight_layout()
+
+        figure_file = output_dir / "yield_vs_n_budget_random_seeds.png"
+
+        fig.savefig(
+            figure_file,
+            dpi=300,
+        )
+
+        plt.close(fig)
+
+        print("\nBudget-seed experiment complete.")
+        print(f"Raw results: {raw_file}")
+        print(f"Summary: {summary_file}")
+        print(f"Figure: {figure_file}")
+
+        return df, summary
 
     # ---------------------------
     # 5. Results saving / processing
@@ -1997,8 +2129,9 @@ if __name__ == "__main__":
     print("3. Run multi-year weather comparison")
     print("4. Create weather comparison visualizations")
     print("5. Test weather data")
+    print("6. Run N-budget random-seed experiment")
 
-    choice = input("Enter 1, 2, 3, 4, or 5: ")
+    choice = input("Enter 1, 2, 3, 4, 5, or 6: ")
 
     if choice in ["1", "2"]:
         year = int(input("Enter weather year to run (e.g. 2021): "))
@@ -2051,7 +2184,7 @@ if __name__ == "__main__":
         sim.max_total_n = 300  # CHANGE MAX TOTAL N
 
         best_schedule, best_result, best_score = sim.evolutionary_search(
-            population_size=100, generations=50
+            population_size=100, generations=50, F=0.5, CR=0.5, seed=3
         )
 
         print("\nMAX N:")
@@ -2064,9 +2197,9 @@ if __name__ == "__main__":
         print(best_score)
 
         sim.visualize_results()
-        sim.plot_convergence()
-        sim.plot_convergence_yield()
-        sim.plot_population_diversity()
+        # sim.plot_convergence()
+        # sim.plot_convergence_yield()
+        # sim.plot_population_diversity()
 
     elif choice == "3":
 
@@ -2239,6 +2372,20 @@ if __name__ == "__main__":
         sim.plot_weather_classification(
             start_year,
             end_year,
+        )
+
+    elif choice == "6":
+
+        year = int(input("Enter weather year to run (e.g. 2021): "))
+        sim.set_year(year)
+
+        sim.run_budget_seed_experiment(
+            budget_percentages=[20, 40, 60, 80, 100],
+            seeds=[1, 2, 3],
+            population_size=10,
+            generations=3,
+            F=0.5,
+            CR=0.5,
         )
 
     else:

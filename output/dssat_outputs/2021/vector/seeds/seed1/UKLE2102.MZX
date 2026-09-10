@@ -64,8 +64,9 @@ latitude 38.1233333333333, longitude -84.4972222222222, elevation 267
 
 *FERTILIZERS (INORGANIC)
 @F FDATE  FMCD  FACD  FDEP  FAMN  FAMP  FAMK  FAMC  FAMO  FOCD FERNAME
- 1 21138 FE005 AP001     0   68        0     0     0     0   -99 UREA
- 1 21211 FE005 AP001     0   48        0     0     0     0   -99 UREA
+ 1 21176 FE005 AP001     0   60        0     0     0     0   -99 UREA
+ 1 21211 FE005 AP001     0   22        0     0     0     0   -99 UREA
+ 1 21227 FE005 AP001     0   33        0     0     0     0   -99 UREA
 *RESIDUES AND ORGANIC FERTILIZER
 @R RDATE  RCOD  RAMT  RESN  RESP  RESK  RINP  RDEP  RMET RENAME
  1 21001   -99   -99   -99   -99   -99   -99   -99   -99 -99
